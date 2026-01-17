@@ -45,6 +45,26 @@ elizaos start
 
 The agent will automatically connect to the Hyperscape server and begin playing.
 
+On startup, you'll see a banner showing configuration status:
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║ Character: GameBot                                                    ║
+╠══════════════════════════════════════════════════════════════════════╣
+║     ██╗  ██╗██╗   ██╗██████╗ ███████╗██████╗                          ║
+║     ██║  ██║╚██╗ ██╔╝██╔══██╗██╔════╝██╔══██╗                         ║
+║     ███████║ ╚████╔╝ ██████╔╝█████╗  ██████╔╝                         ║
+║     ██╔══██║  ╚██╔╝  ██╔═══╝ ██╔══╝  ██╔══██╗                         ║
+║     ██║  ██║   ██║   ██║     ███████╗██║  ██║                         ║
+║              ███████╗ ██████╗ █████╗ ██████╗ ███████╗                 ║
+║              ███████╗██╔════╝██╔══██╗██╔══██╗██╔════╝                 ║
+║              ╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝     ╚══════╝                 ║
+╠══════════════════════════════════════════════════════════════════════╣
+║ ✓ HYPERSCAPE_SERVER_URL        ws://localhost:5555/ws  custom        ║
+║ ● HYPERSCAPE_AUTO_RECONNECT    true                    default       ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
 ---
 
 ## Configuration
@@ -180,7 +200,7 @@ Later: "Where did I last chop trees?"
 | **Evaluators** | Assess game state for autonomous decisions (survival, combat, exploration) |
 | **Event Handlers** | Convert game events to memories for learning |
 
-### Providers (6)
+### Providers (8)
 
 | Provider | Context Supplied |
 |----------|-----------------|
@@ -190,6 +210,8 @@ Later: "Where did I last chop trees?"
 | `skillsProvider` | Skill levels and XP progression |
 | `equipmentProvider` | Currently equipped items |
 | `availableActionsProvider` | Context-aware available actions |
+| `hyperscapeInstructionsProvider` | Plugin usage instructions, available actions |
+| `hyperscapeSettingsProvider` | Current config, connection status (non-sensitive) |
 
 ### Evaluators (3)
 
@@ -207,6 +229,7 @@ Later: "Where did I last chop trees?"
 src/
 ├── index.ts                    # Plugin export and configuration
 ├── types.ts                    # TypeScript type definitions
+├── banner.ts                   # ANSI startup banner
 ├── services/
 │   └── HyperscapeService.ts    # WebSocket connection, state management
 ├── providers/
@@ -215,7 +238,8 @@ src/
 │   ├── nearbyEntities.ts       # Players, NPCs, resources
 │   ├── skills.ts               # Skill levels, XP
 │   ├── equipment.ts            # Equipped items
-│   └── availableActions.ts     # Context-aware actions
+│   ├── availableActions.ts     # Context-aware actions
+│   └── plugin-info.ts          # Instructions & settings providers
 ├── actions/
 │   ├── movement.ts             # MOVE_TO, FOLLOW, STOP
 │   ├── combat.ts               # ATTACK, COMBAT_STYLE

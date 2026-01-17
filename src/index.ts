@@ -1,14 +1,135 @@
 /**
- * @hyperscape/plugin-hyperscape - ElizaOS Plugin for Hyperscape
+ * @hyperscape/plugin-hyperscape
  *
- * This plugin connects ElizaOS AI agents to Hyperscape multiplayer RPG worlds,
- * enabling agents to play as real players with full access to game mechanics.
+ * ============================================================================
+ * WHY THIS PLUGIN EXISTS
+ * ============================================================================
  *
- * Architecture:
- * - Service: HyperscapeService manages WebSocket connection and game state
- * - Providers: Supply game context (health, inventory, nearby entities, skills, equipment, actions)
- * - Actions: Execute game commands (movement, combat, skills, inventory, social, banking)
- * - Event Handlers: Store game events as memories for learning
+ * AI agents need to exist in virtual worlds, not just chat interfaces.
+ * Hyperscape is a 3D multiplayer RPG where agents can:
+ * - Have a persistent avatar with health, inventory, skills
+ * - Navigate a physical world with other players
+ * - Learn from experiences (combat, gathering, social)
+ *
+ * THE PROBLEM:
+ * Game bots are typically hardcoded scripts. They can't adapt, learn, or
+ * have genuine social interactions. They feel artificial.
+ *
+ * THE SOLUTION:
+ * Connect an LLM-powered agent to the game via WebSocket. The agent:
+ * - Receives game state as context (health, nearby entities, etc.)
+ * - Decides actions based on goals and personality
+ * - Stores experiences as memories for future learning
+ * - Can have real conversations with other players
+ *
+ * ============================================================================
+ * HOW IT WORKS
+ * ============================================================================
+ *
+ * 1. SERVICE (HyperscapeService)
+ *    Maintains WebSocket connection to game server. Caches game state.
+ *    Executes commands (move, attack, gather, etc.).
+ *
+ *    WHY a service: Game connection is stateful and long-lived.
+ *    Multiple components need access to the same connection.
+ *
+ * 2. PROVIDERS (6 total)
+ *    Supply game context to the LLM each decision cycle:
+ *    - gameState: Health, stamina, position, combat status
+ *    - inventory: Items, coins, free slots
+ *    - nearbyEntities: Players, NPCs, resources in range
+ *    - skills: Skill levels and XP progression
+ *    - equipment: Currently equipped items
+ *    - availableActions: Context-aware action list
+ *
+ *    WHY providers: The LLM needs to "see" the game world.
+ *    Without context, it can't make informed decisions.
+ *
+ * 3. EVALUATORS (3 total)
+ *    Assess game state for autonomous decision-making:
+ *    - survivalEvaluator: Health, threats, urgency level
+ *    - explorationEvaluator: Discovery opportunities
+ *    - combatEvaluator: Combat threats and opportunities
+ *
+ *    WHY evaluators: Provide structured assessments rather than
+ *    raw data. "You're in danger" vs "health=15, goblin nearby".
+ *
+ * 4. ACTIONS (20+ total)
+ *    Execute game commands when LLM decides:
+ *    - Movement: MOVE_TO, FOLLOW_ENTITY, STOP
+ *    - Combat: ATTACK, CHANGE_COMBAT_STYLE
+ *    - Skills: CHOP_TREE, CATCH_FISH, COOK_FOOD
+ *    - Inventory: EQUIP, USE_ITEM, DROP
+ *    - Social: CHAT, FIND_PLAYER
+ *    - Banking: DEPOSIT, WITHDRAW
+ *
+ *    WHY actions: The LLM's "hands" in the game world.
+ *    Each action maps to a WebSocket command.
+ *
+ * 5. EVENT HANDLERS
+ *    Convert game events to memories for learning:
+ *    - Combat victory → "Defeated goblin at [10, 5, 20]"
+ *    - Skill level-up → "Reached level 50 fishing"
+ *    - Player interaction → "Talked to DragonSlayer99"
+ *
+ *    WHY events→memories: Enables semantic search of past experiences.
+ *    "Where did I last chop trees?" returns actual locations.
+ *
+ * ============================================================================
+ * PROGRESSIVE ENHANCEMENT
+ * ============================================================================
+ *
+ * Hyperscape works standalone as a functional game bot. But when optional
+ * plugins are present, it gains enhanced capabilities:
+ *
+ * | Plugin | Enhancement |
+ * |--------|-------------|
+ * | plugin-homeostasis | Game health affects psychological drives |
+ * | plugin-goals | Game-specific goal templates and evaluation |
+ * | plugin-presence | Nearby players visible cross-domain |
+ * | plugin-skills | Skills queryable as `hyperscape:fishing:75` |
+ * | plugin-rolodex | Link game identities to Discord/Twitter |
+ *
+ * WHY progressive enhancement: Not everyone needs all features.
+ * A simple game bot shouldn't require a full psychology system.
+ * But if you want emotional depth, it's available.
+ *
+ * ============================================================================
+ * SURVIVAL ARCHITECTURE: MICRO VS MACRO
+ * ============================================================================
+ *
+ * Two-layer survival for standalone operation + emotional depth:
+ *
+ * MICRO (survivalEvaluator) - Built-in, always active
+ *   "Health 15% + goblin = FLEE NOW"
+ *   Immediate tactical decisions. Resets each tick.
+ *
+ * MACRO (plugin-homeostasis) - Optional, persistent
+ *   "That near-death was traumatic → security drive -15"
+ *   Emotional impact persists across domains.
+ *
+ * WHY two layers: Micro handles reflexes without external dependencies.
+ * Macro adds emotional depth when available.
+ *
+ * ============================================================================
+ * EXAMPLE USAGE
+ * ============================================================================
+ *
+ * // Get the service for direct game interaction:
+ * const service = runtime.getService<HyperscapeService>('hyperscapeService');
+ *
+ * // Check connection status
+ * if (service?.isConnected()) {
+ *   const state = service.getGameState();
+ *   console.log(`Health: ${state.player.health}/${state.player.maxHealth}`);
+ * }
+ *
+ * // Execute a command directly (usually done via actions)
+ * await service.executeCommand('move', { x: 10, y: 5, z: 20 });
+ *
+ * // Get nearby entities
+ * const nearby = service.getNearbyEntities();
+ * const players = nearby.filter(e => e.type === 'player');
  */
 
 import type { Plugin, IAgentRuntime, UUID } from "@elizaos/core";
@@ -30,6 +151,7 @@ import { nearbyEntitiesProvider } from "./providers/nearbyEntities.js";
 import { skillsProvider } from "./providers/skills.js";
 import { equipmentProvider } from "./providers/equipment.js";
 import { availableActionsProvider } from "./providers/availableActions.js";
+import { hyperscapeInstructionsProvider, hyperscapeSettingsProvider } from "./providers/plugin-info.js";
 // goalProvider removed - now using plugin-goals with hyperscape domain registration
 
 // Actions
@@ -86,6 +208,9 @@ import { getSettingsRoute } from "./routes/settings.js";
 import { getLogsRoute } from "./routes/logs.js";
 import { messageRoute } from "./routes/message.js";
 import { goalRoute } from "./routes/goal.js";
+
+// Banner
+import { printHyperscapeBanner } from "./banner.js";
 
 /**
  * Calculate distance between two positions (2D, ignoring Y)
@@ -705,6 +830,9 @@ export const hyperscapePlugin: Plugin = {
   },
 
   async init(config: Record<string, string>, runtime: IAgentRuntime) {
+    // Print startup banner with settings
+    printHyperscapeBanner(runtime);
+
     logger.info("[HyperscapePlugin] Initializing plugin...");
 
     try {
@@ -807,6 +935,8 @@ export const hyperscapePlugin: Plugin = {
     skillsProvider, // Skill levels and XP
     equipmentProvider, // Equipped items
     availableActionsProvider, // Context-aware available actions
+    hyperscapeInstructionsProvider, // Plugin usage instructions for LLM
+    hyperscapeSettingsProvider, // Current configuration (non-sensitive)
   ],
 
   // Evaluators assess game state for autonomous decision making
